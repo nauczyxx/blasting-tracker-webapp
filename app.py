@@ -2,14 +2,16 @@ import streamlit as st
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 import pandas as pd
+import json
 
 # --- Configuración ---
 SCOPE = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
-CREDS_PATH = '/home/nauczyx/Documents/Blasting/blasting-credentials.json'
 SPREADSHEET_NAME = 'Blasting tracker'
 HOJA = 'draft'
 
-creds = ServiceAccountCredentials.from_json_keyfile_name(CREDS_PATH, SCOPE)
+# 🔐 Credenciales desde secrets
+creds_dict = st.secrets["gcp_service_account"]
+creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, SCOPE)
 client = gspread.authorize(creds)
 sheet = client.open(SPREADSHEET_NAME).worksheet(HOJA)
 data = sheet.get_all_records()
