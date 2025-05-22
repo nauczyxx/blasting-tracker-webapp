@@ -4,12 +4,13 @@ from oauth2client.service_account import ServiceAccountCredentials
 import pandas as pd
 import os
 
-# --- Configuración ---
+# --- Layout y Configuración inicial ---
+st.set_page_config(page_title="Blasting WebApp", layout="wide")
+
 SCOPE = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
 SPREADSHEET_NAME = 'Blasting tracker'
-HOJA = 'draft'
 
-# --- Credenciales: local o cloud ---
+# --- Manejo de credenciales ---
 if os.path.exists("blasting-credentials.json"):
     creds = ServiceAccountCredentials.from_json_keyfile_name("blasting-credentials.json", SCOPE)
 else:
@@ -17,9 +18,38 @@ else:
     creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, SCOPE)
 
 client = gspread.authorize(creds)
-sheet = client.open(SPREADSHEET_NAME).worksheet(HOJA)
+spreadsheet = client.open(SPREADSHEET_NAME)
+
+hojas_disponibles = [ws.title for ws in spreadsheet.worksheets() if "/" in ws.title or ws.title.lower() == "draft"]
+hojas_disponibles.sort(key=lambda x: x if x.lower() == "draft" else pd.to_datetime(x, dayfirst=True), reverse=True)
+hoja_seleccionada = st.selectbox("📅 Select date", hojas_disponibles, index=0)
+sheet = spreadsheet.worksheet(hoja_seleccionada)
 data = sheet.get_all_records()
 
+# --- Función de filtros reutilizable ---
+def aplicar_filtros(df):
+    st.markdown("## 🎛️ Filters")
+    filtros = st.columns([1.5, 1.5, 1.5, 2])
+
+    unique_blasters = df['blaster'].dropna().unique().tolist()
+    selected_blaster = filtros[0].selectbox("👤 Blaster", ["All"] + sorted(unique_blasters))
+    if selected_blaster != "All":
+        df = df[df['blaster'] == selected_blaster]
+
+    markets = df['market'].dropna().unique().tolist()
+    selected_market = filtros[1].selectbox("📍 Market", ["All"] + sorted(markets))
+    if selected_market != "All":
+        df = df[df['market'] == selected_market]
+
+    statuses = df['status'].dropna().str.capitalize().unique().tolist()
+    selected_status = filtros[2].selectbox("📌 Status", ["All"] + sorted(statuses))
+    if selected_status != "All":
+        df = df[df['status'].str.capitalize() == selected_status]
+
+    filtros[3].markdown("[📄 Ver Active Drivers](https://docs.google.com/spreadsheets/d/1H-iMzmnnWsevIzjbW1QOwIqcy4zTV1eRaJSteRfZiwg/edit?usp=sharing)")
+    return df
+
+# --- Preparar DataFrame ---
 df = pd.DataFrame(data)
 df.columns = (
     df.columns.str.strip()
@@ -31,7 +61,6 @@ df.columns = (
 )
 df = df[df['tracking_id'] != '']
 
-# --- Limpiar campos monetarios ---
 money_cols = [
     'margin', 'bonus_driver1', 'bonus_driver2', 'est_charge',
     'base_driver_earnings_1', 'base_driver_earnings_2',
@@ -40,20 +69,14 @@ money_cols = [
 ]
 for col in money_cols:
     if col in df.columns:
-        df[col] = (
-            df[col].astype(str)
-            .str.replace('$', '', regex=False)
-            .str.replace(',', '')
-            .replace('', '0')
-            .astype(float)
-        )
+        df[col] = df[col].astype(str).str.replace('$', '', regex=False).str.replace(',', '').replace('', '0').astype(float)
 
-# --- Layout general ---
-st.set_page_config(page_title="Blasting WebApp", layout="wide")
+df = aplicar_filtros(df)
+
+# --- Layout e indicadores ---
 st.title("📊 Blasting Tracker WebApp")
-st.caption(f"Mostrando viajes desde hoja: `{HOJA}`")
+st.caption(f"Mostrando viajes desde hoja: `{hoja_seleccionada}`")
 
-# --- KPIs ---
 st.markdown("## 📈 KPIs")
 total_trips = len(df)
 assigned = df[df['status'].str.lower() == "assigned"]
@@ -65,15 +88,7 @@ col1.metric("Total trips", total_trips)
 col2.metric("Assigned (%)", f"{assigned_pct}%")
 col3.metric("Average margin", f"${avg_margin}")
 
-# --- Filtro por blaster ---
-st.markdown("## 🚛 Blasting by Status")
-unique_blasters = df['blaster'].dropna().unique().tolist()
-selected_blaster = st.selectbox("👤 Filter by blaster (optional)", ["All"] + unique_blasters)
-
-if selected_blaster != "All":
-    df = df[df['blaster'] == selected_blaster]
-
-# --- Colores por status ---
+# --- Clasificación por status ---
 status_colors = {
     'pending': '#FFD43B',
     'blasting': '#FFA500',
@@ -81,7 +96,6 @@ status_colors = {
     'dropped': '#FF6B6B'
 }
 
-# --- Mostrar viajes por status ---
 for status in ['pending', 'blasting', 'assigned', 'dropped']:
     section_df = df[df['status'].str.lower() == status]
     if not section_df.empty:
