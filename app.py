@@ -2,16 +2,20 @@ import streamlit as st
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 import pandas as pd
-import json
+import os
 
 # --- Configuración ---
 SCOPE = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
 SPREADSHEET_NAME = 'Blasting tracker'
 HOJA = 'draft'
 
-# 🔐 Credenciales desde secrets
-creds_dict = st.secrets["gcp_service_account"]
-creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, SCOPE)
+# --- Credenciales: local o cloud ---
+if os.path.exists("blasting-credentials.json"):
+    creds = ServiceAccountCredentials.from_json_keyfile_name("blasting-credentials.json", SCOPE)
+else:
+    creds_dict = st.secrets["gcp_service_account"]
+    creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, SCOPE)
+
 client = gspread.authorize(creds)
 sheet = client.open(SPREADSHEET_NAME).worksheet(HOJA)
 data = sheet.get_all_records()
@@ -28,11 +32,13 @@ df.columns = (
 df = df[df['tracking_id'] != '']
 
 # --- Limpiar campos monetarios ---
-cols_to_clean = ['margin', 'bonus_driver1', 'bonus_driver2', 'est_charge',
-                 'base_driver_earnings_1', 'base_driver_earnings_2',
-                 'current_driver_earnings_1', 'current_driver_earnings_2',
-                 'total_current_earnings']
-for col in cols_to_clean:
+money_cols = [
+    'margin', 'bonus_driver1', 'bonus_driver2', 'est_charge',
+    'base_driver_earnings_1', 'base_driver_earnings_2',
+    'current_driver_earnings_1', 'current_driver_earnings_2',
+    'total_current_earnings'
+]
+for col in money_cols:
     if col in df.columns:
         df[col] = (
             df[col].astype(str)
@@ -42,7 +48,7 @@ for col in cols_to_clean:
             .astype(float)
         )
 
-# --- Layout ---
+# --- Layout general ---
 st.set_page_config(page_title="Blasting WebApp", layout="wide")
 st.title("📊 Blasting Tracker WebApp")
 st.caption(f"Mostrando viajes desde hoja: `{HOJA}`")
@@ -75,7 +81,7 @@ status_colors = {
     'dropped': '#FF6B6B'
 }
 
-# --- Viajes agrupados por status ---
+# --- Mostrar viajes por status ---
 for status in ['pending', 'blasting', 'assigned', 'dropped']:
     section_df = df[df['status'].str.lower() == status]
     if not section_df.empty:
@@ -100,8 +106,8 @@ for status in ['pending', 'blasting', 'assigned', 'dropped']:
 
             with st.expander("✏️ Edit travel", expanded=False):
                 with st.form(f"edit_form_{tracking}"):
-                    new_status = st.selectbox("Status", options=["Pending", "Blasting", "Assigned", "Dropped"], index=["Pending", "Blasting", "Assigned", "Dropped"].index(row.get("status", "Pending").capitalize()))
-                    new_stage = st.selectbox("Blasting Stage", options=["Initial offer", "Bonus adjustment", "Follow - up", "Assigned"], index=["Initial offer", "Bonus adjustment", "Follow - up", "Assigned"].index(row.get("blasting_stage", "Initial offer")))
+                    new_status = st.selectbox("Status", ["Pending", "Blasting", "Assigned", "Dropped"], index=["Pending", "Blasting", "Assigned", "Dropped"].index(row.get("status", "Pending").capitalize()))
+                    new_stage = st.selectbox("Blasting Stage", ["Initial offer", "Bonus adjustment", "Follow - up", "Assigned"], index=["Initial offer", "Bonus adjustment", "Follow - up", "Assigned"].index(row.get("blasting_stage", "Initial offer")))
                     new_est_charge = st.number_input("Est. Charge", value=row.get("est_charge", 0.0), step=1.0)
                     new_base_1 = st.number_input("Base Driver Earnings 1", value=row.get("base_driver_earnings_1", 0.0), step=1.0)
                     new_base_2 = st.number_input("Base Driver Earnings 2", value=row.get("base_driver_earnings_2", 0.0), step=1.0)
