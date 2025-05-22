@@ -4,13 +4,13 @@ from oauth2client.service_account import ServiceAccountCredentials
 import pandas as pd
 import os
 
-# --- Layout y Configuración inicial ---
+# --- Streamlit Config (debe ir primero) ---
 st.set_page_config(page_title="Blasting WebApp", layout="wide")
 
+# --- Autenticación ---
 SCOPE = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
 SPREADSHEET_NAME = 'Blasting tracker'
 
-# --- Manejo de credenciales ---
 if os.path.exists("blasting-credentials.json"):
     creds = ServiceAccountCredentials.from_json_keyfile_name("blasting-credentials.json", SCOPE)
 else:
@@ -20,45 +20,16 @@ else:
 client = gspread.authorize(creds)
 spreadsheet = client.open(SPREADSHEET_NAME)
 
+# --- Selección de hoja ---
 hojas_disponibles = [ws.title for ws in spreadsheet.worksheets() if "/" in ws.title or ws.title.lower() == "draft"]
 hojas_disponibles.sort(key=lambda x: x if x.lower() == "draft" else pd.to_datetime(x, dayfirst=True), reverse=True)
 hoja_seleccionada = st.selectbox("📅 Select date", hojas_disponibles, index=0)
 sheet = spreadsheet.worksheet(hoja_seleccionada)
 data = sheet.get_all_records()
 
-# --- Función de filtros reutilizable ---
-def aplicar_filtros(df):
-    st.markdown("## 🎛️ Filters")
-    filtros = st.columns([1.5, 1.5, 1.5, 2])
-
-    unique_blasters = df['blaster'].dropna().unique().tolist()
-    selected_blaster = filtros[0].selectbox("👤 Blaster", ["All"] + sorted(unique_blasters))
-    if selected_blaster != "All":
-        df = df[df['blaster'] == selected_blaster]
-
-    markets = df['market'].dropna().unique().tolist()
-    selected_market = filtros[1].selectbox("📍 Market", ["All"] + sorted(markets))
-    if selected_market != "All":
-        df = df[df['market'] == selected_market]
-
-    statuses = df['status'].dropna().str.capitalize().unique().tolist()
-    selected_status = filtros[2].selectbox("📌 Status", ["All"] + sorted(statuses))
-    if selected_status != "All":
-        df = df[df['status'].str.capitalize() == selected_status]
-
-    filtros[3].markdown("[📄 Ver Active Drivers](https://docs.google.com/spreadsheets/d/1H-iMzmnnWsevIzjbW1QOwIqcy4zTV1eRaJSteRfZiwg/edit?usp=sharing)")
-    return df
-
 # --- Preparar DataFrame ---
 df = pd.DataFrame(data)
-df.columns = (
-    df.columns.str.strip()
-    .str.lower()
-    .str.replace(" ", "_")
-    .str.replace("-", "_")
-    .str.replace("(", "")
-    .str.replace(")", "")
-)
+df.columns = df.columns.str.strip().str.lower().str.replace(" ", "_").str.replace("-", "_").str.replace("(", "").str.replace(")", "")
 df = df[df['tracking_id'] != '']
 
 money_cols = [
@@ -71,24 +42,48 @@ for col in money_cols:
     if col in df.columns:
         df[col] = df[col].astype(str).str.replace('$', '', regex=False).str.replace(',', '').replace('', '0').astype(float)
 
-df = aplicar_filtros(df)
+# --- LOGO + TÍTULO ---
+st.image("https://i.imgur.com/s2bcjYq.png", width=140)
+st.markdown("<h1 style='text-align: center; color: #004aad;'>🚚 Bungii Blasting Tracker</h1>", unsafe_allow_html=True)
+st.caption(f"📅 Sheet: `{hoja_seleccionada}`")
+st.markdown("---")
 
-# --- Layout e indicadores ---
-st.title("📊 Blasting Tracker WebApp")
-st.caption(f"Mostrando viajes desde hoja: `{hoja_seleccionada}`")
+# --- Filtros ---
+st.markdown("### 🎛️ Filters")
+filtros = st.columns([1.5, 1.5, 1.5, 2])
 
-st.markdown("## 📈 KPIs")
+unique_blasters = df['blaster'].dropna().unique().tolist()
+selected_blaster = filtros[0].selectbox("👤 Blaster", ["All"] + sorted(unique_blasters))
+if selected_blaster != "All":
+    df = df[df['blaster'] == selected_blaster]
+
+markets = df['market'].dropna().unique().tolist()
+selected_market = filtros[1].selectbox("🌎 Market", ["All"] + sorted(markets))
+if selected_market != "All":
+    df = df[df['market'] == selected_market]
+
+statuses = df['status'].dropna().str.capitalize().unique().tolist()
+selected_status = filtros[2].selectbox("🚦 Status", ["All"] + sorted(statuses))
+if selected_status != "All":
+    df = df[df['status'].str.capitalize() == selected_status]
+
+filtros[3].markdown("[📄 Ver Active Drivers](https://docs.google.com/spreadsheets/d/1H-iMzmnnWsevIzjbW1QOwIqcy4zTV1eRaJSteRfZiwg/edit?usp=sharing)")
+
+# --- KPIs ---
+st.markdown("### 📊 KPIs")
 total_trips = len(df)
 assigned = df[df['status'].str.lower() == "assigned"]
 assigned_pct = round((len(assigned) / total_trips) * 100, 1) if total_trips else 0
 avg_margin = round(df['margin'].mean(), 2) if not df['margin'].isnull().all() else 0
 
-col1, col2, col3 = st.columns(3)
-col1.metric("Total trips", total_trips)
-col2.metric("Assigned (%)", f"{assigned_pct}%")
-col3.metric("Average margin", f"${avg_margin}")
+k1, k2, k3 = st.columns(3)
+k1.metric("🧾 Total trips", total_trips)
+k2.metric("✅ Assigned (%)", f"{assigned_pct}%")
+k3.metric("💰 Avg. margin", f"${avg_margin}")
 
-# --- Clasificación por status ---
+# --- VIAJES ---
+st.markdown("### 🗂️ Status")
+
 status_colors = {
     'pending': '#FFD43B',
     'blasting': '#FFA500',
